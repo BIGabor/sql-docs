@@ -281,20 +281,35 @@ The following Transact-SQL examples demonstrate the detailed steps to fail over 
     ```  
 
     At this point, the distributed availability group is not available.
-
-1. Test the failover readiness. Run the following query:
+ 
+1. Test the failover readiness. Run the following query on both nodes:
 
     ```sql
-    SELECT ag.name, 
-        drs.database_id, 
-        drs.group_id, 
-        drs.replica_id, 
-        drs.synchronization_state_desc, 
-        drs.end_of_log_lsn 
-    FROM sys.dm_hadr_database_replica_states drs, sys.availability_groups ag
-    WHERE drs.group_id = ag.group_id; 
+    SELECT ag.name,
+        ar.replica_server_name,
+        DB_NAME(drs_child.database_id) AS DatabaseName,
+        drs_child.last_redone_lsn,
+        drs_child.synchronization_state_desc,
+        drs_child.synchronization_health_desc
+    FROM sys.availability_groups ag
+    JOIN sys.availability_replicas ar
+        ON ag.group_id = ar.group_id
+    LEFT JOIN sys.availability_groups ag_child
+        ON ag_child.name = ar.replica_server_name
+    LEFT JOIN sys.dm_hadr_database_replica_states drs
+        ON drs.group_id = ag_child.group_id
+        AND drs.replica_id = ar.replica_id
+    JOIN sys.availability_replicas ar_child
+        ON ag_child.group_id = ar_child.group_id
+    LEFT JOIN sys.dm_hadr_database_replica_states drs_child
+        ON drs_child.group_id = ag_child.group_id
+        AND drs_child.replica_id = ar_child.replica_id
+    WHERE drs_child.is_local = 1
+    AND ag.name = 'distributedag'
+    AND ag.is_distributed = 1
+    ORDER BY DatabaseName;
     ```  
-    The availability group is ready to fail over when the **synchronization_state_desc** is `SYNCHRONIZED` and the **end_of_log_lsn** is the same for both availability groups. 
+    The availability group is ready to fail over when the **synchronization_state_desc** is `SYNCHRONIZED` and the **last_redone_lsn** is the same for both availability groups.
 
 1. Fail over from the primary availability group to the secondary availability group. Run the following command on the SQL Server that hosts the primary replica for the secondary availability group. 
 
@@ -304,7 +319,7 @@ The following Transact-SQL examples demonstrate the detailed steps to fail over 
 
     After this step, the distributed availability group is available.
       
-After completing the steps above, the distributed availability group fails over without any data loss. If the availability groups are across a geographical distance that causes latency, change the availability mode back to ASYNCHRONOUS_COMMIT. 
+After completing the steps above, the distributed availability group fails over without any data loss. If the availability groups are across a geographical distance that causes latency, change the availability mode back to ASYNCHRONOUS_COMMIT. Same script, as in point 1, just replace ASYNCHRONOUS_COMMIT with ASYNCHRONOUS_COMMIT, and execute on both node.
   
 ## Remove a distributed availability group  
  The following Transact-SQL statement removes a distributed availability group named `distributedag`:  
